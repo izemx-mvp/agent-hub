@@ -2,14 +2,14 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { LayoutDashboard, Bot, ListChecks, Workflow, ScrollText, Settings, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const items = [
+const items: { to: string; label: string; icon: typeof LayoutDashboard; exact?: boolean }[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/agents", label: "Agents", icon: Bot },
   { to: "/tasks", label: "Tasks", icon: ListChecks },
   { to: "/workflows", label: "Workflows", icon: Workflow },
   { to: "/logs", label: "Logs", icon: ScrollText },
   { to: "/settings", label: "Settings", icon: Settings },
-] as const;
+];
 
 export function Sidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
