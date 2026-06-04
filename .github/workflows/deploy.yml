@@ -1,10 +1,114 @@
+# Standalone deploy (no reusable workflow) — avoids "workflow was not found"
+# when izemx-mvp/.github is private or not shared with this repo yet.
+# Org secrets: DOCKER_AUTH_CONFIG, KUBECONFIG, HOSTINGER_API_TOKEN, DISCORD_WEBHOOK_URL
+# Org variables: DOCKER_NAMESPACE, MVP_SERVER_IP, DOMAIN, CLUSTER_ISSUER
+
 name: Deploy MVP
 
 on:
   push:
     branches: [main, develop]
 
+permissions:
+  contents: read
+
 jobs:
   deploy:
-    uses: izemx-mvp/.github/.github/workflows/mvp-deploy.yml@main
-    secrets: inherit
+    runs-on: ubuntu-latest
+    env:
+      REGISTRY: docker.io
+      SLUG: ${{ github.event.repository.name }}
+      DOCKER_NAMESPACE: ${{ vars.DOCKER_NAMESPACE }}
+      DOMAIN: ${{ vars.DOMAIN }}
+      MVP_SERVER_IP: ${{ vars.MVP_SERVER_IP }}
+      CLUSTER_ISSUER: ${{ vars.CLUSTER_ISSUER }}
+    steps:
+      - name: Checkout app code
+        uses: actions/checkout@v4
+
+      - name: Checkout MVP templates
+        uses: actions/checkout@v4
+        with:
+          repository: izemx-mvp/.github
+          path: .mvp
+
+      - name: Stage build assets + ensure build:docker script
+        run: |
+          cp .mvp/mvp-template/Dockerfile .
+          cp .mvp/mvp-template/nginx.conf .
+          cp .mvp/mvp-template/vite.config.docker.ts .
+          cp .mvp/mvp-template/.dockerignore .
+          cp -r .mvp/mvp-template/k8s ./k8s
+          if [ ! -f package.json ]; then
+            echo "ERROR: package.json missing"; exit 1
+          fi
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json'));p.scripts=p.scripts||{};if(!p.scripts['build:docker']){p.scripts['build:docker']='vite build --config vite.config.docker.ts';fs.writeFileSync('package.json',JSON.stringify(p,null,2));console.log('added build:docker');}"
+
+      - name: Docker Hub auth (reuse DOCKER_AUTH_CONFIG)
+        env:
+          DOCKER_AUTH_CONFIG: ${{ secrets.DOCKER_AUTH_CONFIG }}
+        run: |
+          if [ -z "$DOCKER_AUTH_CONFIG" ]; then
+            echo "ERROR: DOCKER_AUTH_CONFIG secret is empty"; exit 1
+          fi
+          mkdir -p ~/.docker
+          printf '%s' "$DOCKER_AUTH_CONFIG" > ~/.docker/config.json
+
+      - name: Build and push image
+        id: build
+        run: |
+          IMAGE="${REGISTRY}/${DOCKER_NAMESPACE}/${SLUG}"
+          TAG="${GITHUB_SHA::12}"
+          docker build -t "${IMAGE}:${TAG}" -t "${IMAGE}:latest" .
+          docker push "${IMAGE}:${TAG}"
+          docker push "${IMAGE}:latest"
+          echo "image=${IMAGE}:${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
+        run: |
+          mkdir -p ~/.kube
+          printf '%s' "$KUBECONFIG_CONTENT" > ~/.kube/config
+          chmod 600 ~/.kube/config
+          CLUSTER=$(kubectl config view -o jsonpath='{.clusters[0].name}')
+          kubectl config unset "clusters.${CLUSTER}.certificate-authority-data" || true
+          kubectl config set-cluster "${CLUSTER}" \
+            --server="https://${MVP_SERVER_IP}:6443" \
+            --insecure-skip-tls-verify=true
+
+      - name: Deploy to Kubernetes
+        env:
+          IMAGE: ${{ steps.build.outputs.image }}
+        run: |
+          HOST="${SLUG}.${DOMAIN}"
+          echo "Deploying ${IMAGE} -> https://${HOST}"
+          for f in k8s/*.yaml; do
+            sed -e "s|__IMAGE__|${IMAGE}|g" \
+                -e "s|__SLUG__|${SLUG}|g" \
+                -e "s|__HOST__|${HOST}|g" \
+                -e "s|__CLUSTER_ISSUER__|${CLUSTER_ISSUER}|g" \
+                "$f" | kubectl apply --validate=false -f -
+          done
+          kubectl rollout status "deployment/${SLUG}" -n mvp-lab --timeout=180s
+
+      - name: Update Hostinger DNS
+        run: |
+          curl -s -o /tmp/dns.json -w "DNS HTTP %{http_code}\n" -X PUT \
+            -H "Authorization: Bearer ${{ secrets.HOSTINGER_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "https://developers.hostinger.com/api/dns/v1/zones/${DOMAIN}" \
+            -d "{\"overwrite\":false,\"zone\":[{\"name\":\"${SLUG}\",\"type\":\"A\",\"ttl\":300,\"records\":[{\"content\":\"${MVP_SERVER_IP}\"}]}]}"
+          cat /tmp/dns.json || true
+
+      - name: Notify Discord
+        if: success()
+        run: |
+          if [ -n "${{ secrets.DISCORD_WEBHOOK_URL }}" ]; then
+            curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"content\":\"✅ MVP **${SLUG}** deployed successfully\nhttps://${SLUG}.${DOMAIN}\"}"
+          fi
