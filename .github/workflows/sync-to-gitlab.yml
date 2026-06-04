@@ -1,0 +1,23 @@
+name: Sync to GitLab
+
+on:
+  push:
+    branches: [develop, main, staging]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Push to GitLab
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+          GITLAB_PROJECT: izemx/client/mvp/${{ github.event.repository.name }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.email "github-sync@izemx.com"
+          git config user.name "GitHub Sync"
+          git remote add gitlab "https://oauth2:${GITLAB_TOKEN}@mc-git.com/${GITLAB_PROJECT}.git"
+          git push gitlab "HEAD:${BRANCH}" --force-with-lease
