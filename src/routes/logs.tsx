@@ -38,7 +38,7 @@ function LogsPage() {
 
       <Card className="p-3 flex flex-wrap gap-2">
         <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
           <Input placeholder="Search logs…" value={q} onChange={(e) => setQ(e.target.value)} className="pl-9" />
         </div>
         <Select value={level} onValueChange={setLevel}>
