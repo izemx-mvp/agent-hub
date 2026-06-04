@@ -1,4 +1,0 @@
-include:
-  - project: izemx/client/mvp/Templates
-    ref: develop
-    file: .gitlab-ci.yml
