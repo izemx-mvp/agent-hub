@@ -53,6 +53,15 @@ jobs:
           fi
           mkdir -p ~/.docker
           printf '%s' "$DOCKER_AUTH_CONFIG" > ~/.docker/config.json
+          python3 -m json.tool ~/.docker/config.json > /dev/null || {
+            echo "ERROR: DOCKER_AUTH_CONFIG is not valid JSON (fix org secret — see workflow comments)"
+            head -c 80 ~/.docker/config.json | xxd
+            exit 1
+          }
+          if ! grep -q '"auths"' ~/.docker/config.json; then
+            echo "ERROR: config.json must contain an auths object (run: docker login, copy ~/.docker/config.json)"
+            exit 1
+          fi
 
       - name: Build and push image
         id: build
