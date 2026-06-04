@@ -19,5 +19,5 @@ jobs:
         run: |
           git config user.email "github-sync@izemx.com"
           git config user.name "GitHub Sync"
-          git remote add gitlab "https://oauth2:${GITLAB_TOKEN}@mc-git.com/${GITLAB_PROJECT}.git"
+          git remote add gitlab "http://oauth2:${GITLAB_TOKEN}@mc-git.com/${GITLAB_PROJECT}.git"
           git push gitlab "HEAD:${BRANCH}" --force-with-lease
