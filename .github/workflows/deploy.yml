@@ -105,6 +105,30 @@ jobs:
             -d "{\"overwrite\":false,\"zone\":[{\"name\":\"${SLUG}\",\"type\":\"A\",\"ttl\":300,\"records\":[{\"content\":\"${MVP_SERVER_IP}\"}]}]}"
           cat /tmp/dns.json || true
 
+      - name: Wait for TLS certificate (auto-heal cert-manager race)
+        run: |
+          NS=mvp-lab
+          CERT="${SLUG}-tls"
+          healed=0
+          for i in $(seq 1 30); do
+            READY=$(kubectl get certificate "$CERT" -n "$NS" \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
+            if [ "$READY" = "True" ]; then
+              echo "✅ Certificate $CERT is Ready"
+              exit 0
+            fi
+            ERRORED=$(kubectl get order -n "$NS" --no-headers 2>/dev/null \
+              | awk -v c="$CERT" '$1 ~ ("^" c) && $2=="errored"{print $1}')
+            if [ -n "$ERRORED" ] && [ "$healed" -eq 0 ]; then
+              echo "Detected errored order ($ERRORED) — deleting certificate to force clean retry"
+              kubectl delete certificate "$CERT" -n "$NS" --ignore-not-found
+              healed=1
+            fi
+            echo "Waiting for TLS cert... ($i/30) ready=${READY:-pending}"
+            sleep 10
+          done
+          echo "WARNING: $CERT not Ready after ~5min; site serves over HTTP until TLS finishes."
+
       - name: Notify Discord
         if: success()
         run: |
