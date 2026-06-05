@@ -44,41 +44,16 @@ jobs:
           fi
           node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json'));p.scripts=p.scripts||{};if(!p.scripts['build:docker']){p.scripts['build:docker']='vite build --config vite.config.docker.ts';fs.writeFileSync('package.json',JSON.stringify(p,null,2));console.log('added build:docker');}"
 
-      - name: Docker Hub auth (reuse DOCKER_AUTH_CONFIG)
+      - name: Docker Hub login
         env:
-          DOCKER_AUTH_CONFIG: ${{ secrets.DOCKER_AUTH_CONFIG }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
-          if [ -z "$DOCKER_AUTH_CONFIG" ]; then
-            echo "ERROR: DOCKER_AUTH_CONFIG secret is empty"; exit 1
+          if [ -z "$DOCKER_USERNAME" ] || [ -z "$DOCKER_PASSWORD" ]; then
+            echo "ERROR: set org secrets DOCKER_USERNAME and DOCKER_PASSWORD (Docker Hub access token)"
+            exit 1
           fi
-          mkdir -p ~/.docker
-          python3 <<'PY'
-          import base64, json, os, sys
-          raw = os.environ["DOCKER_AUTH_CONFIG"].strip()
-          candidates = [("raw", raw)]
-          try:
-            decoded = base64.b64decode(raw, validate=True).decode("utf-8").strip()
-            candidates.append(("base64", decoded))
-          except Exception:
-            pass
-          config = None
-          for label, text in candidates:
-            try:
-              data = json.loads(text)
-              if isinstance(data, dict) and "auths" in data:
-                config = data
-                print(f"Using DOCKER_AUTH_CONFIG ({label})")
-                break
-            except json.JSONDecodeError:
-              continue
-          if config is None:
-            print("ERROR: DOCKER_AUTH_CONFIG must be JSON config.json (or base64 of that JSON).")
-            print("Fix: run 'docker login', then copy ~/.docker/config.json into the org secret.")
-            print("First bytes:", raw[:40])
-            sys.exit(1)
-          with open(os.path.expanduser("~/.docker/config.json"), "w", encoding="utf-8") as f:
-            json.dump(config, f)
-          PY
+          echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
 
       - name: Build and push image
         id: build
