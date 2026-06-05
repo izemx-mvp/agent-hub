@@ -81,20 +81,39 @@ jobs:
             --server="https://${MVP_SERVER_IP}:6443" \
             --insecure-skip-tls-verify=true
 
+      - name: Wait for Kubernetes API
+        run: |
+          for i in $(seq 1 10); do
+            if kubectl version --request-timeout=15s >/dev/null 2>&1; then
+              echo "✅ Kubernetes API reachable"; exit 0
+            fi
+            echo "API not reachable yet ($i/10), retrying in 15s..."; sleep 15
+          done
+          echo "ERROR: Kubernetes API (${MVP_SERVER_IP}:6443) unreachable after retries"; exit 1
+
       - name: Deploy to Kubernetes
         env:
           IMAGE: ${{ steps.build.outputs.image }}
         run: |
           HOST="${SLUG}.${DOMAIN}"
           echo "Deploying ${IMAGE} -> https://${HOST}"
+          retry() {
+            for i in $(seq 1 5); do
+              "$@" && return 0
+              echo "command failed (attempt $i/5), retrying in 15s..."; sleep 15
+            done
+            return 1
+          }
+          mkdir -p rendered
           for f in k8s/*.yaml; do
             sed -e "s|__IMAGE__|${IMAGE}|g" \
                 -e "s|__SLUG__|${SLUG}|g" \
                 -e "s|__HOST__|${HOST}|g" \
                 -e "s|__CLUSTER_ISSUER__|${CLUSTER_ISSUER}|g" \
-                "$f" | kubectl apply --validate=false -f -
+                "$f" > "rendered/$(basename "$f")"
           done
-          kubectl rollout status "deployment/${SLUG}" -n mvp-lab --timeout=180s
+          retry kubectl apply --validate=false -f rendered/
+          retry kubectl rollout status "deployment/${SLUG}" -n mvp-lab --timeout=180s
 
       - name: Update Hostinger DNS
         run: |
